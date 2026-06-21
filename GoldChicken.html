@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>家政服务平台</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:"Microsoft YaHei",sans-serif}
+body{background:#f0f4f8;color:#333;padding:16px}
+.container{max-width:960px;margin:auto}
+h1,h2{color:#2b6cb0;margin:12px 0}
+nav{background:#2b6cb0;padding:10px 16px;border-radius:8px;margin-bottom:16px;display:flex;gap:16px}
+nav a{color:#fff;text-decoration:none;font-size:15px;cursor:pointer}
+nav a:hover{text-decoration:underline}
+.card{background:#fff;border-radius:10px;padding:16px;margin:10px 0;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+.tag{display:inline-block;background:#ebf8ff;color:#2b6cb0;border-radius:20px;padding:4px 12px;margin:4px;font-size:13px}
+button{background:#2b6cb0;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:14px}
+button:hover{background:#2c5282}
+input,select,textarea{width:100%;padding:8px;margin:6px 0 12px;border:1px solid #ccc;border-radius:6px;font-size:14px}
+.stars{color:#ecc94b;font-size:18px}
+.section{display:none}
+.section.active{display:block}
+.badge{display:inline-block;background:#fed7d7;color:#c53030;border-radius:4px;padding:2px 8px;font-size:12px}
+.success{background:#c6f6d5;color:#276749;padding:10px;border-radius:6px;margin:8px 0}
+</style>
+</head>
+<body>
+<div class="container">
+
+<nav>
+  <a onclick="show('home')">🏠 首页</a>
+  <a onclick="show('staff')">👥 选择服务人员</a>
+  <a onclick="show('orders')">📦 我的订单</a>
+  <a onclick="show('feedback')">📝 用户反馈</a>
+</nav>
+
+<!-- 首页 -->
+<div id="home" class="section active"></div>
+
+<!-- 服务人员列表 -->
+<div id="staff" class="section"></div>
+
+<!-- 服务人员详情 -->
+<div id="detail" class="section"></div>
+
+<!-- 我的订单 -->
+<div id="orders" class="section"></div>
+
+<!-- 用户反馈 -->
+<div id="feedback" class="section"></div>
+
+</div>
+
+<script>
+// ==================== 数据层 ====================
+const DB = {
+  services: [
+    {id:1,name:'家庭保洁',icon:'🧹'},
+    {id:2,name:'月嫂/育儿',icon:'👶'},
+    {id:3,name:'家电维修',icon:'🔧'},
+    {id:4,name:'搬家服务',icon:'📦'}
+  ],
+  staffs: [
+    {id:1,name:'王阿姨',age:42,skill:'家庭保洁',price:80,desc:'5年经验，细心负责',rating:4.8},
+    {id:2,name:'刘阿姨',age:38,skill:'家庭保洁',price:75,desc:'擅长深度清洁',rating:4.6},
+    {id:3,name:'张师傅',age:45,skill:'家电维修',price:100,desc:'水电/电器全修',rating:4.9},
+    {id:4,name:'陈姐',age:36,skill:'月嫂/育儿',price:150,desc:'持月嫂证，育婴师',rating:4.7},
+    {id:5,name:'李师傅',age:40,skill:'搬家服务',price:200,desc:'专业搬家团队',rating:4.5},
+    {id:6,name:'赵阿姨',age:50,skill:'家庭保洁',price:70,desc:'经验丰富，价格实惠',rating:4.7}
+  ],
+  orders: JSON.parse(localStorage.getItem('orders')||'[]'),
+  comments: JSON.parse(localStorage.getItem('comments')||'[]'),
+  feedbacks: JSON.parse(localStorage.getItem('feedbacks')||'[]'),
+  save(){ localStorage.setItem('orders',JSON.stringify(this.orders));localStorage.setItem('comments',JSON.stringify(this.comments));localStorage.setItem('feedbacks',JSON.stringify(this.feedbacks)) }
+}
+
+// ==================== 路由 ====================
+function show(page, param){
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'))
+  document.getElementById(page).classList.add('active')
+  if(page==='home')    renderHome()
+  if(page==='staff')   renderStaff()
+  if(page==='detail')  renderDetail(param)
+  if(page==='orders')  renderOrders()
+  if(page==='feedback')renderFeedback()
+}
+
+// ==================== 首页 ====================
+function renderHome(){
+  const hot = DB.staffs.slice(0,3)
+  document.getElementById('home').innerHTML=`
+    <h1>🏠 安心家政服务平台</h1>
+    <div>${DB.services.map(s=>`<span class="tag">${s.icon} ${s.name}</span>`).join('')}</div>
+    <h2>🌟 推荐服务人员</h2>
+    ${hot.map(s=>staffCard(s)).join('')}
+  `
+}
+
+// ==================== 服务人员列表 ====================
+function renderStaff(skill=''){
+  let list = skill ? DB.staffs.filter(s=>s.skill===skill) : DB.staffs
+  document.getElementById('staff').innerHTML=`
+    <h1>👥 选择服务人员</h1>
+    <label>按服务类型筛选</label>
+    <select onchange="renderStaff(this.value)">
+      <option value="">全部</option>
+      <option value="家庭保洁" ${skill==='家庭保洁'?'selected':''}>家庭保洁</option>
+      <option value="月嫂/育儿" ${skill==='月嫂/育儿'?'selected':''}>月嫂/育儿</option>
+      <option value="家电维修" ${skill==='家电维修'?'selected':''}>家电维修</option>
+      <option value="搬家服务" ${skill==='搬家服务'?'selected':''}>搬家服务</option>
+    </select>
+    ${list.map(s=>staffCard(s)).join('')}
+  `
+}
+
+function staffCard(s){
+  return `<div class="card">
+    <b>${s.name}</b>（${s.age}岁｜${s.skill}）<br>
+    ${s.desc}<br>
+    ¥${s.price}/h　⭐${s.rating}<br>
+    <button onclick="show('detail',${s.id})">查看详情 & 预约</button>
+  </div>`
+}
+
+// ==================== 服务人员详情（预约+评价） ====================
+function renderDetail(id){
+  const s = DB.staffs.find(x=>x.id===id)
+  if(!s) return show('staff')
+  const cmts = DB.comments.filter(c=>c.staffId===id)
+  document.getElementById('detail').innerHTML=`
+    <h1>${s.name} — ${s.skill}</h1>
+    <div class="card">
+      ${s.desc}<br>年龄：${s.age}｜价格：¥${s.price}/h｜评分：⭐${s.rating}
+    </div>
+
+    <h2>📅 预约此服务</h2>
+    <div class="card">
+      <input id="orderUser" placeholder="您的称呼" required>
+      <input id="orderDate" type="datetime-local" required>
+      <input id="orderAddr" placeholder="服务地址" required>
+      <button onclick="submitOrder(${s.id})">提交预约</button>
+    </div>
+
+    <h2>💬 用户评价（${cmts.length}条）</h2>
+    ${cmts.length?(cmts.map(c=>`<div class="card">${'⭐'.repeat(c.score)} <b>${c.user}</b>：${c.text}</div>`).join('')):'<p style="color:#999">暂无评价</p>'}
+
+    <h2>✍️ 发表评价</h2>
+    <div class="card">
+      <input id="cmtUser" placeholder="您的昵称" required>
+      <select id="cmtScore">
+        <option value="5">⭐⭐⭐⭐⭐ 5星</option>
+        <option value="4">⭐⭐⭐⭐ 4星</option>
+        <option value="3">⭐⭐⭐ 3星</option>
+        <option value="2">⭐⭐ 2星</option>
+        <option value="1">⭐ 1星</option>
+      </select>
+      <textarea id="cmtText" placeholder="写评价…" rows="3" required></textarea>
+      <button onclick="submitComment(${s.id})">提交评价</button>
+    </div>
+    <br><button onclick="show('staff')">← 返回列表</button>
+  `
+}
+
+function submitOrder(staffId){
+  const s = DB.staffs.find(x=>x.id===staffId)
+  DB.orders.unshift({id:Date.now(),staffId,staffName:s.name,user:orderUser.value,date:orderDate.value,addr:orderAddr.value,status:'待接单',time:new Date().toLocaleString()})
+  DB.save()
+  alert('🎉 预约成功！')
+  show('orders')
+}
+
+function submitComment(staffId){
+  DB.comments.unshift({staffId,user:cmtUser.value,score:+cmtScore.value,text:cmtText.value,time:new Date().toLocaleString()})
+  // 更新评分
+  const cs = DB.comments.filter(c=>c.staffId===staffId)
+  const avg = (cs.reduce((a,b)=>a+b.score,0)/cs.length).toFixed(1)
+  DB.staffs.find(x=>x.id===staffId).rating = +avg
+  DB.save()
+  alert('✅ 评价已提交！')
+  renderDetail(staffId)
+}
+
+// ==================== 我的订单 ====================
+function renderOrders(){
+  document.getElementById('orders').innerHTML=`
+    <h1>📦 我的订单</h1>
+    ${DB.orders.length?DB.orders.map(o=>`
+      <div class="card">
+        <b>${o.staffName}</b>　<span class="badge">${o.status}</span><br>
+        客户：${o.user}<br>
+        时间：${o.date.replace('T',' ')}<br>
+        地址：${o.addr}<br>
+        下单时间：${o.time}
+      </div>
+    `).join(''):'<p style="color:#999">暂无订单，快去预约吧～</p>'}
+  `
+}
+
+// ==================== 用户反馈 ====================
+function renderFeedback(){
+  document.getElementById('feedback').innerHTML=`
+    <h1>📝 用户反馈 / 意见投诉</h1>
+    <div class="card">
+      <input id="fbUser" placeholder="您的称呼（可选）">
+      <select id="fbType">
+        <option value="建议">💡 建议</option>
+        <option value="投诉">⚠️ 投诉</option>
+        <option value="其他">📋 其他</option>
+      </select>
+      <textarea id="fbContent" rows="4" placeholder="请输入您的意见…" required></textarea>
+      <button onclick="submitFeedback()">提交反馈</button>
+    </div>
+    <h2>历史反馈（${DB.feedbacks.length}条）</h2>
+    ${DB.feedbacks.length?DB.feedbacks.map(f=>`
+      <div class="card">
+        <b>${f.user||'匿名'}</b>　<span class="badge">${f.type}</span>　<small>${f.time}</small><br>
+        ${f.content}
+      </div>
+    `).join(''):'<p style="color:#999">暂无反馈</p>'}
+  `
+}
+
+function submitFeedback(){
+  DB.feedbacks.unshift({user:fbUser.value||'匿名',type:fbType.value,content:fbContent.value,time:new Date().toLocaleString()})
+  DB.save()
+  fbContent.value=''
+  alert('🙏 感谢您的反馈！')
+  renderFeedback()
+}
+
+// ==================== 初始化 ====================
+renderHome()
+</script>
+</body>
+</html>
