@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>家政服务系统 - 专业家政服务平台</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
@@ -596,6 +597,11 @@
     <div class="toast" id="toast"></div>
 
     <script>
+        // ==================== Supabase 初始化 ====================
+        const SUPABASE_URL = 'https://znuifbjlhbapyqeuxymj.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_Mttlr5FGzumz1rIKJRyd6Q__PeKGOiI';
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
         // ==================== 全局变量 ====================
         let currentUser = null;
         let currentUserType = null;
@@ -603,11 +609,11 @@
         const SERVICE_TYPES = ['保姆', '月嫂', '保洁', '老人护理', '育婴师', '钟点工'];
 
         // ==================== 初始化 ====================
-        function init() {
+        async function init() {
             setupTabSwitching();
             setupCheckboxGroups();
-            loadStats();
-            loadAllJobs();
+            await loadStats();
+            await loadAllJobs();
             var savedUser = localStorage.getItem('currentUser');
             var savedUserType = localStorage.getItem('currentUserType');
             if (savedUser && savedUserType) {
@@ -706,7 +712,7 @@
         }
 
         // ==================== 求职者登录 ====================
-        function workerLogin(e) {
+        async function workerLogin(e) {
             e.preventDefault();
             var phone = document.getElementById('workerLoginPhone').value.trim();
             var password = document.getElementById('workerLoginPassword').value;
@@ -715,27 +721,32 @@
 
             if (!validatePhone(phone)) { showError('workerLoginPhoneError', '请输入正确的11位手机号码'); hasError = true; }
             if (!validatePassword(password)) { showError('workerLoginPasswordError', '密码长度应为6-20位'); hasError = true; }
-            if (hasError) return false;
+            if (hasError) return;
 
-            var workers = JSON.parse(localStorage.getItem('workers') || '[]');
-            var worker = workers.find(function(w) { return w.phone === phone && w.password === password; });
-            if (worker) {
-                currentUser = worker;
+            var { data: user, error } = await supabaseClient
+                .from('users')
+                .select('*')
+                .eq('phone', phone)
+                .eq('password', password)
+                .eq('user_type', 'worker')
+                .maybeSingle();
+
+            if (user) {
+                currentUser = user;
                 currentUserType = 'worker';
                 localStorage.setItem('currentUser', JSON.stringify(currentUser));
                 localStorage.setItem('currentUserType', currentUserType);
-                showToast('登录成功！欢迎回来，' + worker.name, 'success');
+                showToast('登录成功！欢迎回来，' + user.name, 'success');
                 updateUIForLoggedInUser();
                 document.getElementById('workerLoginForm').reset();
                 showPage('worker');
             } else {
                 showToast('手机号或密码错误，请重试', 'error');
             }
-            return false;
         }
 
         // ==================== 求职者注册 ====================
-        function workerRegister(e) {
+        async function workerRegister(e) {
             e.preventDefault();
             var name = document.getElementById('workerName').value.trim();
             var phone = document.getElementById('workerPhone').value.trim();
@@ -754,21 +765,31 @@
             if (!address) { showError('workerAddressError', '请输入居住地址'); hasError = true; }
             if (!age || parseInt(age) < 18 || parseInt(age) > 65) { showError('workerAgeError', '年龄应在18-65岁之间'); hasError = true; }
             if (!gender) { showToast('请选择性别', 'error'); hasError = true; }
-            if (hasError) return false;
+            if (hasError) return;
 
-            var workers = JSON.parse(localStorage.getItem('workers') || '[]');
-            if (workers.find(function(w) { return w.phone === phone; })) {
+            // 检查手机号是否已注册
+            var { data: existing } = await supabaseClient
+                .from('users')
+                .select('id')
+                .eq('phone', phone)
+                .maybeSingle();
+            if (existing) {
                 showToast('该手机号已注册，请直接登录', 'error');
-                return false;
+                return;
             }
-            var newWorker = {
-                id: 'worker_' + Date.now(),
-                name: name, phone: phone, password: password,
-                age: parseInt(age), gender: gender, address: address,
-                createdAt: new Date().toISOString()
-            };
-            workers.push(newWorker);
-            localStorage.setItem('workers', JSON.stringify(workers));
+
+            var { data: newWorker, error } = await supabaseClient
+                .from('users')
+                .insert([{
+                    name: name, phone: phone, password: password,
+                    user_type: 'worker', age: parseInt(age),
+                    gender: gender, address: address
+                }])
+                .select()
+                .single();
+
+            if (error) { showToast('注册失败，请重试', 'error'); return; }
+
             currentUser = newWorker;
             currentUserType = 'worker';
             localStorage.setItem('currentUser', JSON.stringify(currentUser));
@@ -779,11 +800,10 @@
             showPage('worker');
             loadWorkerProfile();
             loadStats();
-            return false;
         }
 
         // ==================== 雇主登录 ====================
-        function employerLogin(e) {
+        async function employerLogin(e) {
             e.preventDefault();
             var phone = document.getElementById('employerLoginPhone').value.trim();
             var password = document.getElementById('employerLoginPassword').value;
@@ -792,27 +812,32 @@
 
             if (!validatePhone(phone)) { showError('employerLoginPhoneError', '请输入正确的11位手机号码'); hasError = true; }
             if (!validatePassword(password)) { showError('employerLoginPasswordError', '密码长度应为6-20位'); hasError = true; }
-            if (hasError) return false;
+            if (hasError) return;
 
-            var employers = JSON.parse(localStorage.getItem('employers') || '[]');
-            var employer = employers.find(function(e) { return e.phone === phone && e.password === password; });
-            if (employer) {
-                currentUser = employer;
+            var { data: user, error } = await supabaseClient
+                .from('users')
+                .select('*')
+                .eq('phone', phone)
+                .eq('password', password)
+                .eq('user_type', 'employer')
+                .maybeSingle();
+
+            if (user) {
+                currentUser = user;
                 currentUserType = 'employer';
                 localStorage.setItem('currentUser', JSON.stringify(currentUser));
                 localStorage.setItem('currentUserType', currentUserType);
-                showToast('登录成功！欢迎回来，' + employer.name, 'success');
+                showToast('登录成功！欢迎回来，' + user.name, 'success');
                 updateUIForLoggedInUser();
                 document.getElementById('employerLoginForm').reset();
                 showPage('employer');
             } else {
                 showToast('手机号或密码错误，请重试', 'error');
             }
-            return false;
         }
 
         // ==================== 雇主注册 ====================
-        function employerRegister(e) {
+        async function employerRegister(e) {
             e.preventDefault();
             var name = document.getElementById('employerName').value.trim();
             var phone = document.getElementById('employerPhone').value.trim();
@@ -827,21 +852,29 @@
             if (!validatePassword(password)) { showError('employerPasswordError', '密码长度应为6-20位'); hasError = true; }
             if (password !== passwordConfirm) { showError('employerPasswordConfirmError', '两次输入的密码不一致'); hasError = true; }
             if (!address) { showError('employerAddressError', '请输入家庭住址'); hasError = true; }
-            if (hasError) return false;
+            if (hasError) return;
 
-            var employers = JSON.parse(localStorage.getItem('employers') || '[]');
-            if (employers.find(function(e) { return e.phone === phone; })) {
+            var { data: existing } = await supabaseClient
+                .from('users')
+                .select('id')
+                .eq('phone', phone)
+                .maybeSingle();
+            if (existing) {
                 showToast('该手机号已注册，请直接登录', 'error');
-                return false;
+                return;
             }
-            var newEmployer = {
-                id: 'employer_' + Date.now(),
-                name: name, phone: phone, password: password,
-                address: address,
-                createdAt: new Date().toISOString()
-            };
-            employers.push(newEmployer);
-            localStorage.setItem('employers', JSON.stringify(employers));
+
+            var { data: newEmployer, error } = await supabaseClient
+                .from('users')
+                .insert([{
+                    name: name, phone: phone, password: password,
+                    user_type: 'employer', address: address
+                }])
+                .select()
+                .single();
+
+            if (error) { showToast('注册失败，请重试', 'error'); return; }
+
             currentUser = newEmployer;
             currentUserType = 'employer';
             localStorage.setItem('currentUser', JSON.stringify(currentUser));
@@ -852,7 +885,6 @@
             showPage('employer');
             loadEmployerProfile();
             loadStats();
-            return false;
         }
 
         // ==================== 退出登录 ====================
@@ -886,13 +918,14 @@
             if (!currentUser || currentUserType !== 'worker') return;
             document.getElementById('workerProfileName').textContent = currentUser.name;
             document.getElementById('workerProfilePhone').textContent = currentUser.phone;
+            var createdAt = currentUser.created_at || currentUser.createdAt || '';
             document.getElementById('workerInfoGrid').innerHTML =
                 '<div class="info-item"><div class="info-item-label">姓名</div><div class="info-item-value">' + currentUser.name + '</div></div>' +
                 '<div class="info-item"><div class="info-item-label">手机号码</div><div class="info-item-value">' + currentUser.phone + '</div></div>' +
                 '<div class="info-item"><div class="info-item-label">年龄</div><div class="info-item-value">' + currentUser.age + ' 岁</div></div>' +
                 '<div class="info-item"><div class="info-item-label">性别</div><div class="info-item-value">' + currentUser.gender + '</div></div>' +
                 '<div class="info-item"><div class="info-item-label">居住地址</div><div class="info-item-value">' + currentUser.address + '</div></div>' +
-                '<div class="info-item"><div class="info-item-label">注册时间</div><div class="info-item-value">' + new Date(currentUser.createdAt).toLocaleString() + '</div></div>' +
+                '<div class="info-item"><div class="info-item-label">注册时间</div><div class="info-item-value">' + (createdAt ? new Date(createdAt).toLocaleString() : '') + '</div></div>' +
                 '<div class="info-item"><div class="info-item-label">用户类型</div><div class="info-item-value"><span class="badge badge-primary">求职者</span></div></div>' +
                 '<div class="info-item"><div class="info-item-label">用户ID</div><div class="info-item-value" style="font-size:12px;word-break:break-all;">' + currentUser.id + '</div></div>';
         }
@@ -902,11 +935,12 @@
             if (!currentUser || currentUserType !== 'employer') return;
             document.getElementById('employerProfileName').textContent = currentUser.name;
             document.getElementById('employerProfilePhone').textContent = currentUser.phone;
+            var createdAt = currentUser.created_at || currentUser.createdAt || '';
             document.getElementById('employerInfoGrid').innerHTML =
                 '<div class="info-item"><div class="info-item-label">姓名</div><div class="info-item-value">' + currentUser.name + '</div></div>' +
                 '<div class="info-item"><div class="info-item-label">手机号码</div><div class="info-item-value">' + currentUser.phone + '</div></div>' +
                 '<div class="info-item"><div class="info-item-label">家庭住址</div><div class="info-item-value">' + currentUser.address + '</div></div>' +
-                '<div class="info-item"><div class="info-item-label">注册时间</div><div class="info-item-value">' + new Date(currentUser.createdAt).toLocaleString() + '</div></div>' +
+                '<div class="info-item"><div class="info-item-label">注册时间</div><div class="info-item-value">' + (createdAt ? new Date(createdAt).toLocaleString() : '') + '</div></div>' +
                 '<div class="info-item"><div class="info-item-label">用户类型</div><div class="info-item-value"><span class="badge badge-success">雇主</span></div></div>' +
                 '<div class="info-item"><div class="info-item-label">用户ID</div><div class="info-item-value" style="font-size:12px;word-break:break-all;">' + currentUser.id + '</div></div>';
         }
@@ -920,26 +954,29 @@
             document.getElementById('editProfileModal').classList.add('show');
         }
 
-        function updateWorkerProfile(e) {
+        async function updateWorkerProfile(e) {
             e.preventDefault();
             var name = document.getElementById('editWorkerName').value.trim();
             var age = parseInt(document.getElementById('editWorkerAge').value);
             var gender = document.getElementById('editWorkerGender').value;
             var address = document.getElementById('editWorkerAddress').value.trim();
-            if (!name || !age || !gender || !address) { showToast('请填写完整信息', 'error'); return false; }
+            if (!name || !age || !gender || !address) { showToast('请填写完整信息', 'error'); return; }
+
+            var { error } = await supabaseClient
+                .from('users')
+                .update({ name: name, age: age, gender: gender, address: address })
+                .eq('id', currentUser.id);
+            if (error) { showToast('更新失败，请重试', 'error'); return; }
+
             currentUser.name = name;
             currentUser.age = age;
             currentUser.gender = gender;
             currentUser.address = address;
-            var workers = JSON.parse(localStorage.getItem('workers') || '[]');
-            var index = workers.findIndex(function(w) { return w.id === currentUser.id; });
-            if (index !== -1) { workers[index] = currentUser; localStorage.setItem('workers', JSON.stringify(workers)); }
             localStorage.setItem('currentUser', JSON.stringify(currentUser));
             closeModal('editProfileModal');
             showToast('信息更新成功！', 'success');
             loadWorkerProfile();
             updateUIForLoggedInUser();
-            return false;
         }
 
         // ==================== 编辑雇主个人信息 ====================
@@ -949,22 +986,25 @@
             document.getElementById('editEmployerProfileModal').classList.add('show');
         }
 
-        function updateEmployerProfile(e) {
+        async function updateEmployerProfile(e) {
             e.preventDefault();
             var name = document.getElementById('editEmployerName').value.trim();
             var address = document.getElementById('editEmployerAddress').value.trim();
-            if (!name || !address) { showToast('请填写完整信息', 'error'); return false; }
+            if (!name || !address) { showToast('请填写完整信息', 'error'); return; }
+
+            var { error } = await supabaseClient
+                .from('users')
+                .update({ name: name, address: address })
+                .eq('id', currentUser.id);
+            if (error) { showToast('更新失败，请重试', 'error'); return; }
+
             currentUser.name = name;
             currentUser.address = address;
-            var employers = JSON.parse(localStorage.getItem('employers') || '[]');
-            var index = employers.findIndex(function(emp) { return emp.id === currentUser.id; });
-            if (index !== -1) { employers[index] = currentUser; localStorage.setItem('employers', JSON.stringify(employers)); }
             localStorage.setItem('currentUser', JSON.stringify(currentUser));
             closeModal('editEmployerProfileModal');
             showToast('信息更新成功！', 'success');
             loadEmployerProfile();
             updateUIForLoggedInUser();
-            return false;
         }
 
         // ==================== 发布求职信息 ====================
@@ -975,7 +1015,7 @@
             return result;
         }
 
-        function publishJob(e) {
+        async function publishJob(e) {
             e.preventDefault();
             var serviceTypes = getSelectedServiceTypes('serviceTypes');
             var workExperience = document.getElementById('workExperience').value;
@@ -995,36 +1035,34 @@
                 showError('priceError', '请输入有效的价格范围（最低价应小于最高价）'); hasError = true;
             }
             if (!workDescription) { showError('workDescriptionError', '请填写工作经历描述'); hasError = true; }
-            if (hasError) return false;
+            if (hasError) return;
 
-            var job = {
-                id: 'job_' + Date.now(),
-                workerId: currentUser.id,
-                workerName: currentUser.name,
-                workerPhone: currentUser.phone,
-                serviceTypes: serviceTypes,
-                workExperience: workExperience,
-                education: education,
-                priceMin: priceMin,
-                priceMax: priceMax,
-                availableTime: availableTime,
-                workDescription: workDescription,
-                selfIntroduction: selfIntroduction,
-                createdAt: new Date().toISOString()
-            };
-            var jobs = JSON.parse(localStorage.getItem('workerJobs') || '[]');
-            jobs.push(job);
-            localStorage.setItem('workerJobs', JSON.stringify(jobs));
+            var { error } = await supabaseClient
+                .from('worker_jobs')
+                .insert([{
+                    user_id: currentUser.id,
+                    worker_name: currentUser.name,
+                    worker_phone: currentUser.phone,
+                    service_types: serviceTypes,
+                    work_experience: workExperience,
+                    education: education,
+                    price_min: priceMin,
+                    price_max: priceMax,
+                    available_time: availableTime,
+                    work_description: workDescription,
+                    self_introduction: selfIntroduction
+                }]);
+            if (error) { showToast('发布失败，请重试', 'error'); return; }
+
             showToast('求职信息发布成功！', 'success');
             document.getElementById('publishJobForm').reset();
             document.querySelectorAll('#serviceTypes .checkbox-item').forEach(function(item) { item.classList.remove('selected'); });
             loadStats();
             loadWorkerJobs();
-            return false;
         }
 
         // ==================== 发布雇佣信息 ====================
-        function publishHire(e) {
+        async function publishHire(e) {
             e.preventDefault();
             var serviceTypes = getSelectedServiceTypes('hireServiceTypes');
             var location = document.getElementById('hireLocation').value.trim();
@@ -1044,90 +1082,97 @@
             }
             if (!timeRequirement) { showToast('请选择服务时间要求', 'error'); hasError = true; }
             if (!description) { showError('hireDescriptionError', '请填写工作内容描述'); hasError = true; }
-            if (hasError) return false;
+            if (hasError) return;
 
-            var hire = {
-                id: 'hire_' + Date.now(),
-                employerId: currentUser.id,
-                employerName: currentUser.name,
-                employerPhone: currentUser.phone,
-                serviceTypes: serviceTypes,
-                location: location,
-                priceMin: priceMin,
-                priceMax: priceMax,
-                timeRequirement: timeRequirement,
-                urgency: urgency,
-                description: description,
-                otherRequirements: otherRequirements,
-                createdAt: new Date().toISOString()
-            };
-            var hires = JSON.parse(localStorage.getItem('employerJobs') || '[]');
-            hires.push(hire);
-            localStorage.setItem('employerJobs', JSON.stringify(hires));
+            var { error } = await supabaseClient
+                .from('employer_jobs')
+                .insert([{
+                    user_id: currentUser.id,
+                    employer_name: currentUser.name,
+                    employer_phone: currentUser.phone,
+                    service_types: serviceTypes,
+                    location: location,
+                    price_min: priceMin,
+                    price_max: priceMax,
+                    time_requirement: timeRequirement,
+                    urgency: urgency,
+                    description: description,
+                    other_requirements: otherRequirements
+                }]);
+            if (error) { showToast('发布失败，请重试', 'error'); return; }
+
             showToast('雇佣信息发布成功！', 'success');
             document.getElementById('publishHireForm').reset();
             document.querySelectorAll('#hireServiceTypes .checkbox-item').forEach(function(item) { item.classList.remove('selected'); });
             loadStats();
             loadEmployerJobs();
-            return false;
         }
 
         // ==================== 统计信息 ====================
-        function loadStats() {
-            var workers = JSON.parse(localStorage.getItem('workers') || '[]');
-            var employers = JSON.parse(localStorage.getItem('employers') || '[]');
-            var workerJobs = JSON.parse(localStorage.getItem('workerJobs') || '[]');
-            var employerJobs = JSON.parse(localStorage.getItem('employerJobs') || '[]');
-            var totalJobs = workerJobs.length + employerJobs.length;
-            var totalMatches = Math.min(workerJobs.length, employerJobs.length);
+        async function loadStats() {
+            var { count: workerCount } = await supabaseClient.from('users').select('*', { count: 'exact', head: true }).eq('user_type', 'worker');
+            var { count: employerCount } = await supabaseClient.from('users').select('*', { count: 'exact', head: true }).eq('user_type', 'employer');
+            var { count: jobCount } = await supabaseClient.from('worker_jobs').select('*', { count: 'exact', head: true });
+            var { count: hireCount } = await supabaseClient.from('employer_jobs').select('*', { count: 'exact', head: true });
 
-            document.getElementById('totalWorkers').textContent = workers.length;
-            document.getElementById('totalEmployers').textContent = employers.length;
-            document.getElementById('totalJobs').textContent = totalJobs;
-            document.getElementById('totalMatches').textContent = totalMatches;
+            document.getElementById('totalWorkers').textContent = workerCount || 0;
+            document.getElementById('totalEmployers').textContent = employerCount || 0;
+            document.getElementById('totalJobs').textContent = (jobCount || 0) + (hireCount || 0);
+            document.getElementById('totalMatches').textContent = Math.min(jobCount || 0, hireCount || 0);
         }
 
         // ==================== 求职者 - 我的求职信息 ====================
-        function loadWorkerJobs() {
+        async function loadWorkerJobs() {
             var container = document.getElementById('workerJobList');
             if (!currentUser || currentUserType !== 'worker') { container.innerHTML = ''; return; }
-            var jobs = JSON.parse(localStorage.getItem('workerJobs') || '[]');
-            var myJobs = jobs.filter(function(j) { return j.workerId === currentUser.id; });
-            myJobs.sort(function(a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
-            if (myJobs.length === 0) {
+            var { data: jobs } = await supabaseClient
+                .from('worker_jobs')
+                .select('*')
+                .eq('user_id', currentUser.id)
+                .order('created_at', { ascending: false });
+            if (!jobs || jobs.length === 0) {
                 container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><h3>暂无求职信息</h3><p>还没有发布任何求职信息，点击上方"发布求职"开始发布</p></div>';
             } else {
-                container.innerHTML = myJobs.map(function(job) {
-                    return '<div class="job-item"><div class="job-item-header"><div class="job-item-title">' + job.serviceTypes.join('、') + '</div><div class="job-item-price">' + job.priceMin + '-' + job.priceMax + '元/月</div></div><div class="job-item-meta"><span>📅 可用时间: ' + job.availableTime + '</span><span>💼 工作年限: ' + job.workExperience + '</span><span>📝 发布时间: ' + new Date(job.createdAt).toLocaleDateString() + '</span></div><div class="job-item-desc">' + job.workDescription.substring(0, 150) + '</div><div class="job-item-actions"><button class="btn btn-primary btn-small" onclick="editJob(\'' + job.id + '\')">✏ 编辑</button><button class="btn btn-danger btn-small" onclick="deleteJob(\'' + job.id + '\')">🗑 删除</button></div></div>';
+                container.innerHTML = jobs.map(function(job) {
+                    var createdAt = job.created_at || job.createdAt || '';
+                    return '<div class="job-item"><div class="job-item-header"><div class="job-item-title">' + job.service_types.join('、') + '</div><div class="job-item-price">' + job.price_min + '-' + job.price_max + '元/月</div></div><div class="job-item-meta"><span>📅 可用时间: ' + job.available_time + '</span><span>💼 工作年限: ' + job.work_experience + '</span><span>📝 发布时间: ' + (createdAt ? new Date(createdAt).toLocaleDateString() : '') + '</span></div><div class="job-item-desc">' + (job.work_description || '').substring(0, 150) + '</div><div class="job-item-actions"><button class="btn btn-primary btn-small" onclick="editJob(\'' + job.id + '\')">✏ 编辑</button><button class="btn btn-danger btn-small" onclick="deleteJob(\'' + job.id + '\')">🗑 删除</button></div></div>';
                 }).join('');
             }
         }
 
         // ==================== 雇主 - 我的雇佣信息 ====================
-        function loadEmployerJobs() {
+        async function loadEmployerJobs() {
             var container = document.getElementById('employerJobList');
             if (!currentUser || currentUserType !== 'employer') { container.innerHTML = ''; return; }
-            var hires = JSON.parse(localStorage.getItem('employerJobs') || '[]');
-            var myHires = hires.filter(function(h) { return h.employerId === currentUser.id; });
-            myHires.sort(function(a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
-            if (myHires.length === 0) {
+            var { data: hires } = await supabaseClient
+                .from('employer_jobs')
+                .select('*')
+                .eq('user_id', currentUser.id)
+                .order('created_at', { ascending: false });
+            if (!hires || hires.length === 0) {
                 container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><h3>暂无雇佣信息</h3><p>还没有发布任何雇佣信息，点击上方"发布雇佣"开始发布</p></div>';
             } else {
-                container.innerHTML = myHires.map(function(hire) {
-                    return '<div class="job-item"><div class="job-item-header"><div class="job-item-title">' + hire.serviceTypes.join('、') + '</div><div class="job-item-price">' + hire.priceMin + '-' + hire.priceMax + '元/月</div></div><div class="job-item-meta"><span>📍 ' + hire.location + '</span><span>⏰ ' + hire.timeRequirement + '</span><span class="badge badge-warning">' + hire.urgency + '</span><span>📝 ' + new Date(hire.createdAt).toLocaleDateString() + '</span></div><div class="job-item-desc">' + hire.description.substring(0, 150) + '</div><div class="job-item-actions"><button class="btn btn-primary btn-small" onclick="editHire(\'' + hire.id + '\')">✏ 编辑</button><button class="btn btn-danger btn-small" onclick="deleteHire(\'' + hire.id + '\')">🗑 删除</button></div></div>';
+                container.innerHTML = hires.map(function(hire) {
+                    var createdAt = hire.created_at || hire.createdAt || '';
+                    return '<div class="job-item"><div class="job-item-header"><div class="job-item-title">' + hire.service_types.join('、') + '</div><div class="job-item-price">' + hire.price_min + '-' + hire.price_max + '元/月</div></div><div class="job-item-meta"><span>📍 ' + hire.location + '</span><span>⏰ ' + hire.time_requirement + '</span><span class="badge badge-warning">' + hire.urgency + '</span><span>📝 ' + (createdAt ? new Date(createdAt).toLocaleDateString() : '') + '</span></div><div class="job-item-desc">' + (hire.description || '').substring(0, 150) + '</div><div class="job-item-actions"><button class="btn btn-primary btn-small" onclick="editHire(\'' + hire.id + '\')">✏ 编辑</button><button class="btn btn-danger btn-small" onclick="deleteHire(\'' + hire.id + '\')">🗑 删除</button></div></div>';
                 }).join('');
             }
         }
 
         // ==================== 信息浏览页面加载 ====================
-        function loadAllJobs() {
-            var jobs = JSON.parse(localStorage.getItem('workerJobs') || '[]');
-            var hires = JSON.parse(localStorage.getItem('employerJobs') || '[]');
+        async function loadAllJobs() {
+            var { data: jobs } = await supabaseClient.from('worker_jobs').select('*').order('created_at', { ascending: false });
+            var { data: hires } = await supabaseClient.from('employer_jobs').select('*').order('created_at', { ascending: false });
+            jobs = jobs || [];
+            hires = hires || [];
+            cachedJobs = jobs;
+            cachedHires = hires;
+            renderAllJobs(jobs, hires);
+        }
+
+        function renderAllJobs(jobs, hires) {
             var workerContainer = document.getElementById('allWorkerJobs');
             var employerContainer = document.getElementById('allEmployerJobs');
-
-            jobs.sort(function(a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
-            hires.sort(function(a, b) { return new Date(b.createdAt) - new Date(a.createdAt); });
 
             var resultInfoEl = document.getElementById('searchResultInfo');
             if (resultInfoEl) {
@@ -1138,7 +1183,8 @@
                 workerContainer.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><h3>暂无求职信息</h3><p>还没有求职者发布信息</p></div>';
             } else {
                 workerContainer.innerHTML = jobs.map(function(job) {
-                    return '<div class="job-item"><div class="job-item-header"><div class="job-item-title">' + job.serviceTypes.join('、') + '</div><div class="job-item-price">' + job.priceMin + '-' + job.priceMax + '元/月</div></div><div class="job-item-meta"><span>👤 ' + job.workerName + '</span><span>📍 ' + job.workExperience + '</span><span>📅 ' + job.availableTime + '</span><span>📝 ' + new Date(job.createdAt).toLocaleDateString() + '</span></div><div class="job-item-desc">' + job.workDescription.substring(0, 150) + '</div><div class="job-item-actions"><button class="btn btn-primary btn-small" onclick="viewJob(\'' + job.id + '\', \'worker\')">查看详情</button></div></div>';
+                    var createdAt = job.created_at || '';
+                    return '<div class="job-item"><div class="job-item-header"><div class="job-item-title">' + job.service_types.join('、') + '</div><div class="job-item-price">' + job.price_min + '-' + job.price_max + '元/月</div></div><div class="job-item-meta"><span>👤 ' + job.worker_name + '</span><span>💼 ' + job.work_experience + '</span><span>📅 ' + job.available_time + '</span><span>📝 ' + (createdAt ? new Date(createdAt).toLocaleDateString() : '') + '</span></div><div class="job-item-desc">' + (job.work_description || '').substring(0, 150) + '</div><div class="job-item-actions"><button class="btn btn-primary btn-small" onclick="viewJobById(\'' + job.id + '\', \'worker\')">📋 查看详情</button></div></div>';
                 }).join('');
             }
 
@@ -1146,39 +1192,42 @@
                 employerContainer.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><h3>暂无雇佣信息</h3><p>还没有雇主发布信息</p></div>';
             } else {
                 employerContainer.innerHTML = hires.map(function(hire) {
-                    return '<div class="job-item"><div class="job-item-header"><div class="job-item-title">' + hire.serviceTypes.join('、') + '</div><div class="job-item-price">' + hire.priceMin + '-' + hire.priceMax + '元/月</div></div><div class="job-item-meta"><span>👤 ' + hire.employerName + '</span><span>📍 ' + hire.location + '</span><span>⏰ ' + hire.timeRequirement + '</span><span class="badge badge-warning">' + hire.urgency + '</span><span>📝 ' + new Date(hire.createdAt).toLocaleDateString() + '</span></div><div class="job-item-desc">' + hire.description.substring(0, 150) + '</div><div class="job-item-actions"><button class="btn btn-primary btn-small" onclick="viewJob(\'' + hire.id + '\', \'employer\')">查看详情</button></div></div>';
+                    var createdAt = hire.created_at || '';
+                    return '<div class="job-item"><div class="job-item-header"><div class="job-item-title">' + hire.service_types.join('、') + '</div><div class="job-item-price">' + hire.price_min + '-' + hire.price_max + '元/月</div></div><div class="job-item-meta"><span>👤 ' + hire.employer_name + '</span><span>📍 ' + hire.location + '</span><span>⏰ ' + hire.time_requirement + '</span><span class="badge badge-warning">' + hire.urgency + '</span><span>📝 ' + (createdAt ? new Date(createdAt).toLocaleDateString() : '') + '</span></div><div class="job-item-desc">' + (hire.description || '').substring(0, 150) + '</div><div class="job-item-actions"><button class="btn btn-primary btn-small" onclick="viewJobById(\'' + hire.id + '\', \'employer\')">📋 查看详情</button></div></div>';
                 }).join('');
             }
         }
+
+        // ==================== 全局缓存（用于筛选时避免重复查询） ====================
+        var cachedJobs = [];
+        var cachedHires = [];
 
         // ==================== 搜索和筛选 ====================
         function filterJobs() {
             var keyword = document.getElementById('searchKeyword').value.toLowerCase().trim();
             var filterType = document.getElementById('filterType').value;
             var filterCategory = document.getElementById('filterCategory').value;
-            var jobs = JSON.parse(localStorage.getItem('workerJobs') || '[]');
-            var hires = JSON.parse(localStorage.getItem('employerJobs') || '[]');
 
-            var filteredJobs = jobs.filter(function(job) {
+            var filteredJobs = cachedJobs.filter(function(job) {
                 var matchKeyword = !keyword ||
-                    job.serviceTypes.some(function(t) { return t.toLowerCase().indexOf(keyword) !== -1; }) ||
-                    job.workDescription.toLowerCase().indexOf(keyword) !== -1 ||
-                    job.workerName.toLowerCase().indexOf(keyword) !== -1 ||
-                    (job.selfIntroduction && job.selfIntroduction.toLowerCase().indexOf(keyword) !== -1) ||
-                    (job.workExperience && job.workExperience.toLowerCase().indexOf(keyword) !== -1);
-                var matchType = !filterType || job.serviceTypes.indexOf(filterType) !== -1;
+                    job.service_types.some(function(t) { return t.toLowerCase().indexOf(keyword) !== -1; }) ||
+                    job.work_description.toLowerCase().indexOf(keyword) !== -1 ||
+                    job.worker_name.toLowerCase().indexOf(keyword) !== -1 ||
+                    (job.self_introduction && job.self_introduction.toLowerCase().indexOf(keyword) !== -1) ||
+                    (job.work_experience && job.work_experience.toLowerCase().indexOf(keyword) !== -1);
+                var matchType = !filterType || job.service_types.indexOf(filterType) !== -1;
                 var matchCategory = !filterCategory || filterCategory === 'worker' || filterCategory === 'all';
                 return matchKeyword && matchType && matchCategory;
             });
-            var filteredHires = hires.filter(function(hire) {
+            var filteredHires = cachedHires.filter(function(hire) {
                 var matchKeyword = !keyword ||
-                    hire.serviceTypes.some(function(t) { return t.toLowerCase().indexOf(keyword) !== -1; }) ||
+                    hire.service_types.some(function(t) { return t.toLowerCase().indexOf(keyword) !== -1; }) ||
                     hire.description.toLowerCase().indexOf(keyword) !== -1 ||
-                    hire.employerName.toLowerCase().indexOf(keyword) !== -1 ||
+                    hire.employer_name.toLowerCase().indexOf(keyword) !== -1 ||
                     hire.location.toLowerCase().indexOf(keyword) !== -1 ||
-                    (hire.otherRequirements && hire.otherRequirements.toLowerCase().indexOf(keyword) !== -1) ||
-                    (hire.timeRequirement && hire.timeRequirement.toLowerCase().indexOf(keyword) !== -1);
-                var matchType = !filterType || hire.serviceTypes.indexOf(filterType) !== -1;
+                    (hire.other_requirements && hire.other_requirements.toLowerCase().indexOf(keyword) !== -1) ||
+                    (hire.time_requirement && hire.time_requirement.toLowerCase().indexOf(keyword) !== -1);
+                var matchType = !filterType || hire.service_types.indexOf(filterType) !== -1;
                 var matchCategory = !filterCategory || filterCategory === 'employer' || filterCategory === 'all';
                 return matchKeyword && matchType && matchCategory;
             });
@@ -1197,7 +1246,8 @@
                     workerContainer.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔍</div><h3>未找到相关信息</h3><p>请尝试其他搜索条件</p></div>';
                 } else {
                     workerContainer.innerHTML = filteredJobs.map(function(job) {
-                        return '<div class="job-item"><div class="job-item-header"><div class="job-item-title">' + job.serviceTypes.join('、') + '</div><div class="job-item-price">' + job.priceMin + '-' + job.priceMax + '元/月</div></div><div class="job-item-meta"><span>👤 ' + job.workerName + '</span><span>📍 ' + job.workExperience + '</span><span>📅 ' + job.availableTime + '</span><span>📝 ' + new Date(job.createdAt).toLocaleDateString() + '</span></div><div class="job-item-desc">' + job.workDescription.substring(0, 150) + '</div><div class="job-item-actions"><button class="btn btn-primary btn-small" onclick="viewJob(\'' + job.id + '\', \'worker\')">查看详情</button></div></div>';
+                        var createdAt = job.created_at || '';
+                        return '<div class="job-item"><div class="job-item-header"><div class="job-item-title">' + job.service_types.join('、') + '</div><div class="job-item-price">' + job.price_min + '-' + job.price_max + '元/月</div></div><div class="job-item-meta"><span>👤 ' + job.worker_name + '</span><span>💼 ' + job.work_experience + '</span><span>📅 ' + job.available_time + '</span><span>📝 ' + (createdAt ? new Date(createdAt).toLocaleDateString() : '') + '</span></div><div class="job-item-desc">' + (job.work_description || '').substring(0, 150) + '</div><div class="job-item-actions"><button class="btn btn-primary btn-small" onclick="viewJobById(\'' + job.id + '\', \'worker\')">📋 查看详情</button></div></div>';
                     }).join('');
                 }
             }
@@ -1206,92 +1256,102 @@
                     employerContainer.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔍</div><h3>未找到相关信息</h3><p>请尝试其他搜索条件</p></div>';
                 } else {
                     employerContainer.innerHTML = filteredHires.map(function(hire) {
-                        return '<div class="job-item"><div class="job-item-header"><div class="job-item-title">' + hire.serviceTypes.join('、') + '</div><div class="job-item-price">' + hire.priceMin + '-' + hire.priceMax + '元/月</div></div><div class="job-item-meta"><span>👤 ' + hire.employerName + '</span><span>📍 ' + hire.location + '</span><span>⏰ ' + hire.timeRequirement + '</span><span class="badge badge-warning">' + hire.urgency + '</span><span>📝 ' + new Date(hire.createdAt).toLocaleDateString() + '</span></div><div class="job-item-desc">' + hire.description.substring(0, 150) + '</div><div class="job-item-actions"><button class="btn btn-primary btn-small" onclick="viewJob(\'' + hire.id + '\', \'employer\')">查看详情</button></div></div>';
+                        var createdAt = hire.created_at || '';
+                        return '<div class="job-item"><div class="job-item-header"><div class="job-item-title">' + hire.service_types.join('、') + '</div><div class="job-item-price">' + hire.price_min + '-' + hire.price_max + '元/月</div></div><div class="job-item-meta"><span>👤 ' + hire.employer_name + '</span><span>📍 ' + hire.location + '</span><span>⏰ ' + hire.time_requirement + '</span><span class="badge badge-warning">' + hire.urgency + '</span><span>📝 ' + (createdAt ? new Date(createdAt).toLocaleDateString() : '') + '</span></div><div class="job-item-desc">' + (hire.description || '').substring(0, 150) + '</div><div class="job-item-actions"><button class="btn btn-primary btn-small" onclick="viewJobById(\'' + hire.id + '\', \'employer\')">📋 查看详情</button></div></div>';
                     }).join('');
                 }
             }
         }
 
         // ==================== 查看信息详情 ====================
-        function viewJob(id, type) {
-            var storage = type === 'worker' ? 'workerJobs' : 'employerJobs';
-            var jobs = JSON.parse(localStorage.getItem(storage) || '[]');
-            var job = jobs.find(function(j) { return j.id === id; });
+        async function viewJob(id, type) {
+            var job = null;
+            if (type === 'worker') {
+                var { data } = await supabaseClient.from('worker_jobs').select('*').eq('id', id).single();
+                job = data;
+            } else {
+                var { data } = await supabaseClient.from('employer_jobs').select('*').eq('id', id).single();
+                job = data;
+            }
             if (!job) return;
             var content = '';
             document.getElementById('viewJobTitle').textContent = (type === 'worker' ? '求职信息详情' : '雇佣信息详情');
             if (type === 'worker') {
+                var wCreatedAt = job.created_at || '';
                 content = '<div class="info-grid">' +
-                    '<div class="info-item"><div class="info-item-label">求职者姓名</div><div class="info-item-value">' + job.workerName + '</div></div>' +
-                    '<div class="info-item"><div class="info-item-label">联系电话</div><div class="info-item-value" style="color:var(--primary-color);font-weight:bold;">' + job.workerPhone + '</div></div>' +
-                    '<div class="info-item"><div class="info-item-label">服务类型</div><div class="info-item-value">' + job.serviceTypes.join('、') + '</div></div>' +
-                    '<div class="info-item"><div class="info-item-label">工作年限</div><div class="info-item-value">' + job.workExperience + '</div></div>' +
+                    '<div class="info-item"><div class="info-item-label">求职者姓名</div><div class="info-item-value">' + job.worker_name + '</div></div>' +
+                    '<div class="info-item"><div class="info-item-label">联系电话</div><div class="info-item-value" style="color:var(--primary-color);font-weight:bold;">' + job.worker_phone + '</div></div>' +
+                    '<div class="info-item"><div class="info-item-label">服务类型</div><div class="info-item-value">' + job.service_types.join('、') + '</div></div>' +
+                    '<div class="info-item"><div class="info-item-label">工作年限</div><div class="info-item-value">' + job.work_experience + '</div></div>' +
                     '<div class="info-item"><div class="info-item-label">学历</div><div class="info-item-value">' + (job.education || '不限') + '</div></div>' +
-                    '<div class="info-item"><div class="info-item-label">期望薪资</div><div class="info-item-value" style="color:var(--danger-color);font-weight:bold;">' + job.priceMin + '-' + job.priceMax + '元/月</div></div>' +
-                    '<div class="info-item"><div class="info-item-label">可用时间</div><div class="info-item-value">' + job.availableTime + '</div></div>' +
-                    '<div class="info-item"><div class="info-item-label">发布时间</div><div class="info-item-value">' + new Date(job.createdAt).toLocaleString() + '</div></div>' +
+                    '<div class="info-item"><div class="info-item-label">期望薪资</div><div class="info-item-value" style="color:var(--danger-color);font-weight:bold;">' + job.price_min + '-' + job.price_max + '元/月</div></div>' +
+                    '<div class="info-item"><div class="info-item-label">可用时间</div><div class="info-item-value">' + job.available_time + '</div></div>' +
+                    '<div class="info-item"><div class="info-item-label">发布时间</div><div class="info-item-value">' + (wCreatedAt ? new Date(wCreatedAt).toLocaleString() : '') + '</div></div>' +
                     '</div>' +
-                    '<div class="info-item" style="margin-top:15px;"><div class="info-item-label">工作经历描述</div><div class="info-item-value" style="line-height:1.8;">' + job.workDescription + '</div></div>' +
-                    (job.selfIntroduction ? '<div class="info-item" style="margin-top:15px;"><div class="info-item-label">自我介绍</div><div class="info-item-value" style="line-height:1.8;">' + job.selfIntroduction + '</div></div>' : '');
+                    '<div class="info-item" style="margin-top:15px;"><div class="info-item-label">工作经历描述</div><div class="info-item-value" style="line-height:1.8;">' + job.work_description + '</div></div>' +
+                    (job.self_introduction ? '<div class="info-item" style="margin-top:15px;"><div class="info-item-label">自我介绍</div><div class="info-item-value" style="line-height:1.8;">' + job.self_introduction + '</div></div>' : '');
             } else {
+                var eCreatedAt = job.created_at || '';
                 content = '<div class="info-grid">' +
-                    '<div class="info-item"><div class="info-item-label">雇主姓名</div><div class="info-item-value">' + job.employerName + '</div></div>' +
-                    '<div class="info-item"><div class="info-item-label">联系电话</div><div class="info-item-value" style="color:var(--primary-color);font-weight:bold;">' + job.employerPhone + '</div></div>' +
-                    '<div class="info-item"><div class="info-item-label">所需服务</div><div class="info-item-value">' + job.serviceTypes.join('、') + '</div></div>' +
+                    '<div class="info-item"><div class="info-item-label">雇主姓名</div><div class="info-item-value">' + job.employer_name + '</div></div>' +
+                    '<div class="info-item"><div class="info-item-label">联系电话</div><div class="info-item-value" style="color:var(--primary-color);font-weight:bold;">' + job.employer_phone + '</div></div>' +
+                    '<div class="info-item"><div class="info-item-label">所需服务</div><div class="info-item-value">' + job.service_types.join('、') + '</div></div>' +
                     '<div class="info-item"><div class="info-item-label">工作地点</div><div class="info-item-value">' + job.location + '</div></div>' +
-                    '<div class="info-item"><div class="info-item-label">薪资范围</div><div class="info-item-value" style="color:var(--danger-color);font-weight:bold;">' + job.priceMin + '-' + job.priceMax + '元/月</div></div>' +
-                    '<div class="info-item"><div class="info-item-label">服务时间</div><div class="info-item-value">' + job.timeRequirement + '</div></div>' +
+                    '<div class="info-item"><div class="info-item-label">薪资范围</div><div class="info-item-value" style="color:var(--danger-color);font-weight:bold;">' + job.price_min + '-' + job.price_max + '元/月</div></div>' +
+                    '<div class="info-item"><div class="info-item-label">服务时间</div><div class="info-item-value">' + job.time_requirement + '</div></div>' +
                     '<div class="info-item"><div class="info-item-label">急需程度</div><div class="info-item-value"><span class="badge badge-warning">' + job.urgency + '</span></div></div>' +
-                    '<div class="info-item"><div class="info-item-label">发布时间</div><div class="info-item-value">' + new Date(job.createdAt).toLocaleString() + '</div></div>' +
+                    '<div class="info-item"><div class="info-item-label">发布时间</div><div class="info-item-value">' + (eCreatedAt ? new Date(eCreatedAt).toLocaleString() : '') + '</div></div>' +
                     '</div>' +
                     '<div class="info-item" style="margin-top:15px;"><div class="info-item-label">工作内容描述</div><div class="info-item-value" style="line-height:1.8;">' + job.description + '</div></div>' +
-                    (job.otherRequirements ? '<div class="info-item" style="margin-top:15px;"><div class="info-item-label">其他要求</div><div class="info-item-value" style="line-height:1.8;">' + job.otherRequirements + '</div></div>' : '');
+                    (job.other_requirements ? '<div class="info-item" style="margin-top:15px;"><div class="info-item-label">其他要求</div><div class="info-item-value" style="line-height:1.8;">' + job.other_requirements + '</div></div>' : '');
             }
             document.getElementById('viewJobContent').innerHTML = content;
             document.getElementById('viewJobModal').classList.add('show');
         }
 
+        // 从缓存中查看（避免重复查询数据库）
+        function viewJobById(id, type) {
+            viewJob(id, type);
+        }
+
         // ==================== 删除求职信息 ====================
-        function deleteJob(id) {
+        async function deleteJob(id) {
             if (!confirm('确定要删除这条求职信息吗？此操作不可恢复。')) return;
-            var jobs = JSON.parse(localStorage.getItem('workerJobs') || '[]');
-            var newJobs = jobs.filter(function(j) { return j.id !== id; });
-            localStorage.setItem('workerJobs', JSON.stringify(newJobs));
+            var { error } = await supabaseClient.from('worker_jobs').delete().eq('id', id);
+            if (error) { showToast('删除失败，请重试', 'error'); return; }
             showToast('删除成功！', 'success');
             loadWorkerJobs();
             loadStats();
         }
 
         // ==================== 删除雇佣信息 ====================
-        function deleteHire(id) {
+        async function deleteHire(id) {
             if (!confirm('确定要删除这条雇佣信息吗？此操作不可恢复。')) return;
-            var hires = JSON.parse(localStorage.getItem('employerJobs') || '[]');
-            var newHires = hires.filter(function(h) { return h.id !== id; });
-            localStorage.setItem('employerJobs', JSON.stringify(newHires));
+            var { error } = await supabaseClient.from('employer_jobs').delete().eq('id', id);
+            if (error) { showToast('删除失败，请重试', 'error'); return; }
             showToast('删除成功！', 'success');
             loadEmployerJobs();
             loadStats();
         }
 
         // ==================== 编辑求职信息 ====================
-        function editJob(id) {
-            var jobs = JSON.parse(localStorage.getItem('workerJobs') || '[]');
-            var job = jobs.find(function(j) { return j.id === id; });
+        async function editJob(id) {
+            var { data: job } = await supabaseClient.from('worker_jobs').select('*').eq('id', id).single();
             if (!job) return;
             document.getElementById('editJobId').value = job.id;
             var serviceTypesHtml = SERVICE_TYPES.map(function(type) {
-                var checked = job.serviceTypes.indexOf(type) !== -1 ? ' checked' : '';
-                var selectedClass = job.serviceTypes.indexOf(type) !== -1 ? ' selected' : '';
+                var checked = job.service_types.indexOf(type) !== -1 ? ' checked' : '';
+                var selectedClass = job.service_types.indexOf(type) !== -1 ? ' selected' : '';
                 return '<label class="checkbox-item' + selectedClass + '"><input type="checkbox" name="editServiceType" value="' + type + '"' + checked + '>' + type + '</label>';
             }).join('');
             document.getElementById('editServiceTypes').innerHTML = serviceTypesHtml;
-            document.getElementById('editWorkExperience').value = job.workExperience;
+            document.getElementById('editWorkExperience').value = job.work_experience;
             document.getElementById('editEducation').value = job.education || '';
-            document.getElementById('editPriceMin').value = job.priceMin;
-            document.getElementById('editPriceMax').value = job.priceMax;
-            document.getElementById('editAvailableTime').value = job.availableTime;
-            document.getElementById('editWorkDescription').value = job.workDescription;
-            document.getElementById('editSelfIntroduction').value = job.selfIntroduction || '';
+            document.getElementById('editPriceMin').value = job.price_min;
+            document.getElementById('editPriceMax').value = job.price_max;
+            document.getElementById('editAvailableTime').value = job.available_time;
+            document.getElementById('editWorkDescription').value = job.work_description;
+            document.getElementById('editSelfIntroduction').value = job.self_introduction || '';
             document.querySelectorAll('#editServiceTypes .checkbox-item input[type="checkbox"]').forEach(function(checkbox) {
                 checkbox.addEventListener('change', function() {
                     this.closest('.checkbox-item').classList.toggle('selected', this.checked);
@@ -1300,12 +1360,12 @@
             document.getElementById('editJobModal').classList.add('show');
         }
 
-        function updateJob(e) {
+        async function updateJob(e) {
             e.preventDefault();
             var id = document.getElementById('editJobId').value;
             var checkboxes = document.querySelectorAll('#editServiceTypes input[type="checkbox"]:checked');
             var serviceTypes = Array.from(checkboxes).map(function(cb) { return cb.value; });
-            if (serviceTypes.length === 0) { showToast('请至少选择一种服务类型', 'error'); return false; }
+            if (serviceTypes.length === 0) { showToast('请至少选择一种服务类型', 'error'); return; }
             var workExperience = document.getElementById('editWorkExperience').value;
             var education = document.getElementById('editEducation').value;
             var priceMin = parseInt(document.getElementById('editPriceMin').value);
@@ -1314,48 +1374,45 @@
             var workDescription = document.getElementById('editWorkDescription').value.trim();
             var selfIntroduction = document.getElementById('editSelfIntroduction').value.trim();
             if (isNaN(priceMin) || isNaN(priceMax) || priceMin < 0 || priceMax < 0 || priceMin >= priceMax) {
-                showToast('请输入有效的价格范围', 'error'); return false;
+                showToast('请输入有效的价格范围', 'error'); return;
             }
-            if (!workDescription) { showToast('请填写工作经历描述', 'error'); return false; }
+            if (!workDescription) { showToast('请填写工作经历描述', 'error'); return; }
 
-            var jobs = JSON.parse(localStorage.getItem('workerJobs') || '[]');
-            var index = jobs.findIndex(function(j) { return j.id === id; });
-            if (index !== -1) {
-                jobs[index].serviceTypes = serviceTypes;
-                jobs[index].workExperience = workExperience;
-                jobs[index].education = education;
-                jobs[index].priceMin = priceMin;
-                jobs[index].priceMax = priceMax;
-                jobs[index].availableTime = availableTime;
-                jobs[index].workDescription = workDescription;
-                jobs[index].selfIntroduction = selfIntroduction;
-                localStorage.setItem('workerJobs', JSON.stringify(jobs));
-            }
+            var { error } = await supabaseClient.from('worker_jobs').update({
+                service_types: serviceTypes,
+                work_experience: workExperience,
+                education: education,
+                price_min: priceMin,
+                price_max: priceMax,
+                available_time: availableTime,
+                work_description: workDescription,
+                self_introduction: selfIntroduction
+            }).eq('id', id);
+            if (error) { showToast('更新失败，请重试', 'error'); return; }
+
             closeModal('editJobModal');
             showToast('更新成功！', 'success');
             loadWorkerJobs();
-            return false;
         }
 
         // ==================== 编辑雇佣信息 ====================
-        function editHire(id) {
-            var hires = JSON.parse(localStorage.getItem('employerJobs') || '[]');
-            var hire = hires.find(function(h) { return h.id === id; });
+        async function editHire(id) {
+            var { data: hire } = await supabaseClient.from('employer_jobs').select('*').eq('id', id).single();
             if (!hire) return;
             document.getElementById('editHireId').value = hire.id;
             var serviceTypesHtml = SERVICE_TYPES.map(function(type) {
-                var checked = hire.serviceTypes.indexOf(type) !== -1 ? ' checked' : '';
-                var selectedClass = hire.serviceTypes.indexOf(type) !== -1 ? ' selected' : '';
+                var checked = hire.service_types.indexOf(type) !== -1 ? ' checked' : '';
+                var selectedClass = hire.service_types.indexOf(type) !== -1 ? ' selected' : '';
                 return '<label class="checkbox-item' + selectedClass + '"><input type="checkbox" name="editHireServiceType" value="' + type + '"' + checked + '>' + type + '</label>';
             }).join('');
             document.getElementById('editHireServiceTypes').innerHTML = serviceTypesHtml;
             document.getElementById('editHireLocation').value = hire.location;
-            document.getElementById('editHirePriceMin').value = hire.priceMin;
-            document.getElementById('editHirePriceMax').value = hire.priceMax;
-            document.getElementById('editHireTimeRequirement').value = hire.timeRequirement;
+            document.getElementById('editHirePriceMin').value = hire.price_min;
+            document.getElementById('editHirePriceMax').value = hire.price_max;
+            document.getElementById('editHireTimeRequirement').value = hire.time_requirement;
             document.getElementById('editHireUrgency').value = hire.urgency;
             document.getElementById('editHireDescription').value = hire.description;
-            document.getElementById('editHireOtherRequirements').value = hire.otherRequirements || '';
+            document.getElementById('editHireOtherRequirements').value = hire.other_requirements || '';
             document.querySelectorAll('#editHireServiceTypes .checkbox-item input[type="checkbox"]').forEach(function(checkbox) {
                 checkbox.addEventListener('change', function() {
                     this.closest('.checkbox-item').classList.toggle('selected', this.checked);
@@ -1364,12 +1421,12 @@
             document.getElementById('editHireModal').classList.add('show');
         }
 
-        function updateHire(e) {
+        async function updateHire(e) {
             e.preventDefault();
             var id = document.getElementById('editHireId').value;
             var checkboxes = document.querySelectorAll('#editHireServiceTypes input[type="checkbox"]:checked');
             var serviceTypes = Array.from(checkboxes).map(function(cb) { return cb.value; });
-            if (serviceTypes.length === 0) { showToast('请至少选择一种服务类型', 'error'); return false; }
+            if (serviceTypes.length === 0) { showToast('请至少选择一种服务类型', 'error'); return; }
             var location = document.getElementById('editHireLocation').value.trim();
             var priceMin = parseInt(document.getElementById('editHirePriceMin').value);
             var priceMax = parseInt(document.getElementById('editHirePriceMax').value);
@@ -1377,37 +1434,37 @@
             var urgency = document.getElementById('editHireUrgency').value;
             var description = document.getElementById('editHireDescription').value.trim();
             var otherRequirements = document.getElementById('editHireOtherRequirements').value.trim();
-            if (!location) { showToast('请输入工作地点', 'error'); return false; }
+            if (!location) { showToast('请输入工作地点', 'error'); return; }
             if (isNaN(priceMin) || isNaN(priceMax) || priceMin < 0 || priceMax < 0 || priceMin >= priceMax) {
-                showToast('请输入有效的薪资范围', 'error'); return false;
+                showToast('请输入有效的薪资范围', 'error'); return;
             }
-            if (!description) { showToast('请填写工作内容描述', 'error'); return false; }
+            if (!description) { showToast('请填写工作内容描述', 'error'); return; }
 
-            var hires = JSON.parse(localStorage.getItem('employerJobs') || '[]');
-            var index = hires.findIndex(function(h) { return h.id === id; });
-            if (index !== -1) {
-                hires[index].serviceTypes = serviceTypes;
-                hires[index].location = location;
-                hires[index].priceMin = priceMin;
-                hires[index].priceMax = priceMax;
-                hires[index].timeRequirement = timeRequirement;
-                hires[index].urgency = urgency;
-                hires[index].description = description;
-                hires[index].otherRequirements = otherRequirements;
-                localStorage.setItem('employerJobs', JSON.stringify(hires));
-            }
+            var { error } = await supabaseClient.from('employer_jobs').update({
+                service_types: serviceTypes,
+                location: location,
+                price_min: priceMin,
+                price_max: priceMax,
+                time_requirement: timeRequirement,
+                urgency: urgency,
+                description: description,
+                other_requirements: otherRequirements
+            }).eq('id', id);
+            if (error) { showToast('更新失败，请重试', 'error'); return; }
+
             closeModal('editHireModal');
             showToast('更新成功！', 'success');
             loadEmployerJobs();
-            return false;
         }
 
         // ==================== TXT 数据导出 ====================
-        function exportData() {
-            var workers = JSON.parse(localStorage.getItem('workers') || '[]');
-            var employers = JSON.parse(localStorage.getItem('employers') || '[]');
-            var workerJobs = JSON.parse(localStorage.getItem('workerJobs') || '[]');
-            var employerJobs = JSON.parse(localStorage.getItem('employerJobs') || '[]');
+        async function exportData() {
+            var { data: workers } = await supabaseClient.from('users').select('*').eq('user_type', 'worker');
+            var { data: employers } = await supabaseClient.from('users').select('*').eq('user_type', 'employer');
+            var { data: workerJobs } = await supabaseClient.from('worker_jobs').select('*');
+            var { data: employerJobs } = await supabaseClient.from('employer_jobs').select('*');
+            workers = workers || []; employers = employers || [];
+            workerJobs = workerJobs || []; employerJobs = employerJobs || [];
 
             var lines = [];
             lines.push('========================================');
@@ -1419,30 +1476,32 @@
             lines.push('序号 | 姓名 | 手机号 | 密码 | 年龄 | 性别 | 地址 | 注册时间');
             lines.push('------------------------------------------------------------');
             workers.forEach(function(w, i) {
-                lines.push((i + 1) + ' | ' + w.name + ' | ' + w.phone + ' | ' + w.password + ' | ' + (w.age || '') + ' | ' + (w.gender || '') + ' | ' + (w.address || '') + ' | ' + new Date(w.createdAt).toLocaleString());
+                var ct = w.created_at || '';
+                lines.push((i + 1) + ' | ' + w.name + ' | ' + w.phone + ' | ' + w.password + ' | ' + (w.age || '') + ' | ' + (w.gender || '') + ' | ' + (w.address || '') + ' | ' + (ct ? new Date(ct).toLocaleString() : ''));
             });
             lines.push('');
             lines.push('--- 雇主账号 (' + employers.length + ' 条) ---');
             lines.push('序号 | 姓名 | 手机号 | 密码 | 地址 | 注册时间');
             lines.push('------------------------------------------------------------');
             employers.forEach(function(em, i) {
-                lines.push((i + 1) + ' | ' + em.name + ' | ' + em.phone + ' | ' + em.password + ' | ' + (em.address || '') + ' | ' + new Date(em.createdAt).toLocaleString());
+                var ct = em.created_at || '';
+                lines.push((i + 1) + ' | ' + em.name + ' | ' + em.phone + ' | ' + em.password + ' | ' + (em.address || '') + ' | ' + (ct ? new Date(ct).toLocaleString() : ''));
             });
             lines.push('');
             lines.push('--- 求职信息 (' + workerJobs.length + ' 条) ---');
             lines.push('------------------------------------------------------------');
             workerJobs.forEach(function(j) {
-                lines.push('求职者: ' + j.workerName + ' | 电话: ' + j.workerPhone + ' | 类型: ' + j.serviceTypes.join('、') + ' | 薪资: ' + j.priceMin + '-' + j.priceMax + '元/月 | 年限: ' + j.workExperience + ' | 可用时间: ' + j.availableTime);
-                lines.push('  描述: ' + j.workDescription);
-                if (j.selfIntroduction) lines.push('  自我介绍: ' + j.selfIntroduction);
+                lines.push('求职者: ' + j.worker_name + ' | 电话: ' + j.worker_phone + ' | 类型: ' + j.service_types.join('、') + ' | 薪资: ' + j.price_min + '-' + j.price_max + '元/月 | 年限: ' + j.work_experience + ' | 可用时间: ' + j.available_time);
+                lines.push('  描述: ' + j.work_description);
+                if (j.self_introduction) lines.push('  自我介绍: ' + j.self_introduction);
                 lines.push('');
             });
             lines.push('--- 雇佣信息 (' + employerJobs.length + ' 条) ---');
             lines.push('------------------------------------------------------------');
             employerJobs.forEach(function(h) {
-                lines.push('雇主: ' + h.employerName + ' | 电话: ' + h.employerPhone + ' | 类型: ' + h.serviceTypes.join('、') + ' | 薪资: ' + h.priceMin + '-' + h.priceMax + '元/月 | 地点: ' + h.location + ' | 时间: ' + h.timeRequirement + ' | 紧急: ' + h.urgency);
+                lines.push('雇主: ' + h.employer_name + ' | 电话: ' + h.employer_phone + ' | 类型: ' + h.service_types.join('、') + ' | 薪资: ' + h.price_min + '-' + h.price_max + '元/月 | 地点: ' + h.location + ' | 时间: ' + h.time_requirement + ' | 紧急: ' + h.urgency);
                 lines.push('  描述: ' + h.description);
-                if (h.otherRequirements) lines.push('  其他要求: ' + h.otherRequirements);
+                if (h.other_requirements) lines.push('  其他要求: ' + h.other_requirements);
                 lines.push('');
             });
 
@@ -1464,11 +1523,11 @@
             document.getElementById('importFileInput').click();
         }
 
-        function handleFileImport(event) {
+        async function handleFileImport(event) {
             var file = event.target.files[0];
             if (!file) return;
             var reader = new FileReader();
-            reader.onload = function(e) {
+            reader.onload = async function(e) {
                 var content = e.target.result;
                 var workers = parseWorkersFromText(content);
                 var employers = parseEmployersFromText(content);
@@ -1476,22 +1535,32 @@
                     showToast('未从文件中解析到有效账号数据，请确认文件格式', 'error');
                     return;
                 }
-                var existingWorkers = JSON.parse(localStorage.getItem('workers') || '[]');
-                var existingEmployers = JSON.parse(localStorage.getItem('employers') || '[]');
                 var addedW = 0, updatedW = 0;
                 var addedE = 0, updatedE = 0;
-                workers.forEach(function(w) {
-                    var idx = existingWorkers.findIndex(function(ew) { return ew.phone === w.phone; });
-                    if (idx !== -1) { existingWorkers[idx] = w; updatedW++; }
-                    else { existingWorkers.push(w); addedW++; }
-                });
-                employers.forEach(function(em) {
-                    var idx = existingEmployers.findIndex(function(eem) { return eem.phone === em.phone; });
-                    if (idx !== -1) { existingEmployers[idx] = em; updatedE++; }
-                    else { existingEmployers.push(em); addedE++; }
-                });
-                localStorage.setItem('workers', JSON.stringify(existingWorkers));
-                localStorage.setItem('employers', JSON.stringify(existingEmployers));
+                // 导入求职者
+                for (var i = 0; i < workers.length; i++) {
+                    var w = workers[i];
+                    var { data: existing } = await supabaseClient.from('users').select('id').eq('phone', w.phone).maybeSingle();
+                    if (existing) {
+                        await supabaseClient.from('users').update({ name: w.name, password: w.password, age: w.age, gender: w.gender, address: w.address }).eq('id', existing.id);
+                        updatedW++;
+                    } else {
+                        await supabaseClient.from('users').insert([{ name: w.name, phone: w.phone, password: w.password, user_type: 'worker', age: w.age, gender: w.gender, address: w.address }]);
+                        addedW++;
+                    }
+                }
+                // 导入雇主
+                for (var j = 0; j < employers.length; j++) {
+                    var em = employers[j];
+                    var { data: existing } = await supabaseClient.from('users').select('id').eq('phone', em.phone).maybeSingle();
+                    if (existing) {
+                        await supabaseClient.from('users').update({ name: em.name, password: em.password, address: em.address }).eq('id', existing.id);
+                        updatedE++;
+                    } else {
+                        await supabaseClient.from('users').insert([{ name: em.name, phone: em.phone, password: em.password, user_type: 'employer', address: em.address }]);
+                        addedE++;
+                    }
+                }
                 var msg = '导入完成！求职者新增 ' + addedW + ' 条，雇主新增 ' + addedE + ' 条';
                 if (updatedW > 0 || updatedE > 0) msg += '（已更新 ' + updatedW + ' 条求职者、' + updatedE + ' 条雇主）';
                 showToast(msg, 'success');
@@ -1515,10 +1584,8 @@
                 var cols = line.split('|').map(function(c) { return c.trim(); });
                 if (cols.length >= 8) {
                     workers.push({
-                        id: 'worker_imported_' + Date.now() + '_' + workers.length,
                         name: cols[1], phone: cols[2], password: cols[3],
-                        age: parseInt(cols[4]) || 25, gender: cols[5], address: cols[6],
-                        createdAt: new Date().toISOString()
+                        age: parseInt(cols[4]) || 25, gender: cols[5], address: cols[6]
                     });
                 }
             }
@@ -1538,24 +1605,20 @@
                 var cols = line.split('|').map(function(c) { return c.trim(); });
                 if (cols.length >= 6) {
                     employers.push({
-                        id: 'employer_imported_' + Date.now() + '_' + employers.length,
-                        name: cols[1], phone: cols[2], password: cols[3],
-                        address: cols[4],
-                        createdAt: new Date().toISOString()
+                        name: cols[1], phone: cols[2], password: cols[3], address: cols[4]
                     });
                 }
             }
             return employers;
         }
 
-        // ==================== 清空本地数据 ====================
-        function confirmClearData() {
-            if (!confirm('确定要清空所有本地数据吗？\n此操作将删除所有账号和信息，建议先导出备份。')) return;
-            if (!confirm('真的要清空吗？此操作不可恢复！')) return;
-            localStorage.removeItem('workers');
-            localStorage.removeItem('employers');
-            localStorage.removeItem('workerJobs');
-            localStorage.removeItem('employerJobs');
+        // ==================== 清空云端数据 ====================
+        async function confirmClearData() {
+            if (!confirm('确定要清空所有云端数据吗？\n此操作将删除 Supabase 中所有账号和信息，建议先导出备份。')) return;
+            if (!confirm('真的要清空吗？此操作不可恢复！这将影响所有用户！')) return;
+            await supabaseClient.from('worker_jobs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+            await supabaseClient.from('employer_jobs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+            await supabaseClient.from('users').delete().neq('id', '00000000-0000-0000-0000-000000000000');
             localStorage.removeItem('currentUser');
             localStorage.removeItem('currentUserType');
             currentUser = null;
@@ -1563,7 +1626,7 @@
             updateUIForLoggedInUser();
             loadStats();
             loadAllJobs();
-            showToast('所有数据已清空', 'success');
+            showToast('所有云端数据已清空', 'success');
             showPage('home');
         }
 
